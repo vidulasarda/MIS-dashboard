@@ -1,9 +1,11 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
+import { forbidden, getSession } from '@/lib/auth';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
+export async function GET(req: NextRequest) {
+  if ((await getSession(req))?.r !== 'admin') return forbidden();
   const companies = await prisma.company.findMany({
     orderBy: { updatedAt: 'desc' },
     include: { periods: { orderBy: { sequence: 'asc' } }, startupData: true },
