@@ -1,0 +1,31 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  background-image: linear-gradient(#d8d0bc 1px, transparent 1px);
+  background-size: 100% 2.1em;
+}
+
+@media print {
+  body { background-image: none; background: white; }
+  .card, .datatable { break-inside: avoid; }
+  a[href^="http"]::after { content: ' (' attr(href) ')'; font-size: 0.7em; color: #666; }
+}
+
+@layer components {
+  .card { @apply bg-card border border-rule rounded-[3px]; }
+  .note { @apply text-sm text-inksoft bg-[#EFEADA] border-l-[3px] border-brass px-3 py-2 rounded-[2px]; }
+  .sectitle { @apply font-display font-semibold text-lg text-ink flex items-center gap-2.5 mb-3; }
+  .sectitle .rule { @apply flex-1 h-px bg-rule; }
+  .datatable { @apply w-full border-collapse text-sm bg-card; }
+  .datatable th { @apply text-left text-[0.68rem] uppercase tracking-wide text-inksoft border-b-2 border-ink px-2.5 py-2 font-semibold; }
+  .datatable td { @apply px-2.5 py-2 border-b border-rule font-mono; }
+  .datatable td.label { @apply font-body font-medium; }
+  .datatable tr.total td { @apply font-bold border-t border-ink; }
+  .stamp { @apply text-[0.6rem] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-[2px] border; }
+  .stamp.good { @apply text-forest bg-forestbg border-forest; }
+  .stamp.watch { @apply text-amber bg-amberbg border-amber; }
+  .stamp.critical { @apply text-oxblood bg-oxbloodbg border-oxblood; }
+  .stamp.info { @apply text-violet bg-violetbg border-violet; }
+}

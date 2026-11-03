@@ -1,0 +1,80 @@
+// Prisma schema — Postgres (works with Neon, Supabase, Railway, or any managed Postgres)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Company {
+  id           String              @id @default(cuid())
+  name         String
+  location     String?
+  entityType   String?             // e.g. "Private Limited", "Proprietorship"
+  type         String              @default("MSME") // "MSME" | "STARTUP" — determines which dashboard renders
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+  periods      FinancialPeriod[]
+  transactions LedgerTransaction[]
+  startupData  StartupData?
+}
+
+// One row per fiscal period uploaded for an MSME-type company. sequence 0 = most recent
+// ("current"), 1 = the period before that ("previous"). The dashboard always compares
+// sequence 0 vs 1.
+model FinancialPeriod {
+  id        String   @id @default(cuid())
+  companyId String
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  label     String
+  periodEnd DateTime
+  sequence  Int // 0 = current, 1 = previous
+  data      Json // line items — see src/lib/types.ts FinancialLineItems
+
+  disclosedReceivablesAgeing   Json?
+  disclosedPayablesMsmeAgeing  Json?
+  disclosedPayablesOtherAgeing Json?
+  disclosedInventoryAgeing     Json?
+
+  createdAt DateTime @default(now())
+
+  @@unique([companyId, sequence])
+}
+
+// Raw ledger rows (e.g. a Tally "Trade Receivables" export) for MSME companies — kept so FIFO
+// ageing can be recomputed any time, and so more transactions can be appended in future uploads.
+model LedgerTransaction {
+  id          String   @id @default(cuid())
+  companyId   String
+  company     Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  ledgerName  String
+  date        DateTime
+  particulars String
+  vchType     String
+  vchNo       String
+  debit       Float
+  credit      Float
+
+  @@index([companyId, ledgerName])
+}
+
+// One row per STARTUP-type company — holds the whole monthly operating model (MRR, burn,
+// unit economics, cap table, data room) as JSON. Startups are modeled as a monthly time series
+// rather than the two-period annual comparison used for MSME companies, so this is intentionally
+// a different shape rather than reusing FinancialPeriod.
+model StartupData {
+  id          String   @id @default(cuid())
+  companyId   String   @unique
+  company     Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  months        Json // StartupMonth[] — see src/lib/startupTypes.ts
+  assumptions   Json // { grossMarginPct, monthlyChurnRate, avgLifetimeMonths, currency }
+  capTable      Json // { existingCommon, existingOptionPool, existingFdShares, baseRaise, basePremoney, sensitivityRaises[], sensitivityPremoneys[] }
+  dataRoom      Json // { category, document, status }[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
