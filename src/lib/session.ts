@@ -32,14 +32,14 @@ function fromB64u(s: string): Uint8Array {
 }
 
 async function hmacKey(secret: string) {
-  return crypto.subtle.importKey('raw', enc.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign', 'verify']);
+  return crypto.subtle.importKey('raw', enc.encode(secret) as any, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign', 'verify']);
 }
 
 export async function signSession(payload: Session): Promise<string> {
   const secret = getSecret();
   if (!secret) throw new Error('ADMIN_PASSWORD is not configured on the server');
   const body = b64u(enc.encode(JSON.stringify(payload)));
-  const sig = await crypto.subtle.sign('HMAC', await hmacKey(secret), enc.encode(body));
+  const sig = await crypto.subtle.sign('HMAC', await hmacKey(secret), enc.encode(body) as any);
   return `${body}.${b64u(sig)}`;
 }
 
@@ -49,7 +49,7 @@ export async function verifySession(token: string | undefined | null): Promise<S
   const [body, sig] = token.split('.');
   if (!body || !sig) return null;
   try {
-    const ok = await crypto.subtle.verify('HMAC', await hmacKey(secret), fromB64u(sig), enc.encode(body));
+    const ok = await crypto.subtle.verify('HMAC', await hmacKey(secret), fromB64u(sig) as any, enc.encode(body) as any);
     if (!ok) return null;
     const payload = JSON.parse(new TextDecoder().decode(fromB64u(body))) as Session;
     if (!payload || typeof payload.exp !== 'number' || payload.exp < Date.now() / 1000) return null;
