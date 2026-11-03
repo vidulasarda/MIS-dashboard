@@ -71,6 +71,11 @@ async function handleUpload(req: NextRequest) {
     if (result.ledgerRows) allLedgerRows = allLedgerRows.concat(result.ledgerRows);
   }
 
+  // The "debtors/creditors only as totals" note is moot once ageing sheets are supplied
+  if (allReceivables.length || allPayables.length) {
+    for (let i = warnings.length - 1; i >= 0; i--) if (/appear only as totals/i.test(warnings[i])) warnings.splice(i, 1);
+  }
+
   // Previous-year trial balance (a Tally TB has one year only; the prior year comes from a second export)
   for (const file of previousFiles) {
     const buffer = Buffer.from(await file.arrayBuffer());
