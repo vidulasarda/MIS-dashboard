@@ -1,3 +1,9 @@
+> **Logins & per-company access (new).** Set `ADMIN_PASSWORD` in Vercel (log in with email `admin`). Optional `SESSION_SECRET` (any long random string; defaults to the admin password).
+> Open a company → **⚙ Manage company** → *Upload new data*, *Edit details & figures*, *Client access* (create one login per client person; each sees only that company and can re-upload ageing/financial files).
+> The client-login table is created automatically on first use — no database step needed.
+
+> **AI provider is Anthropic Claude again.** Env var: `ANTHROPIC_API_KEY` (optional `ANTHROPIC_MODEL`). `GEMINI_API_KEY` is no longer used.
+
 # Release A.1 — Tally trial balance and signed-PDF input
 
 - **Three ways in:** standard template, Tally trial balance (xlsx/xls/csv), or signed/provisional statements (text PDF, both years).
