@@ -3,11 +3,13 @@ import { prisma } from '@/lib/db';
 import { derive, computeHealthScore, computeMsmeClassification, computeAlerts } from '@/lib/compute';
 import { computeFifoAgeing } from '@/lib/fifo';
 import { EMPTY_LINE_ITEMS, FinancialLineItems } from '@/lib/types';
+import { canAccessCompany, forbidden, getSession } from '@/lib/auth';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 30;
 
 export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
+  if (!canAccessCompany(await getSession(req), params.id)) return forbidden();
   const company = await prisma.company.findUnique({
     where: { id: params.id },
     include: { periods: { orderBy: { sequence: 'asc' } } },
@@ -62,7 +64,24 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
   });
 }
 
+export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
+  if ((await getSession(req))?.r !== 'admin') return forbidden();
+  const b = await req.json().catch(() => ({}));
+  const name = typeof b.name === 'string' ? b.name.trim() : '';
+  if (b.name !== undefined && !name) return NextResponse.json({ error: 'Company name cannot be empty' }, { status: 400 });
+  if (name) await prisma.company.update({ where: { id: params.id }, data: { name } });
+  const periods: [number, any, any][] = [[0, b.currentLabel, b.currentEnd], [1, b.previousLabel, b.previousEnd]];
+  for (const [sequence, label, end] of periods) {
+    const data: any = {};
+    if (typeof label === 'string' && label.trim()) data.label = label.trim();
+    if (typeof end === 'string' && end) { const d = new Date(end); if (!isNaN(d.getTime())) data.periodEnd = d; }
+    if (Object.keys(data).length) await prisma.financialPeriod.updateMany({ where: { companyId: params.id, sequence }, data });
+  }
+  return NextResponse.json({ ok: true });
+}
+
 export async function DELETE(req: NextRequest, { params }: { params: { id: string } }) {
+  if ((await getSession(req))?.r !== 'admin') return forbidden();
   await prisma.company.delete({ where: { id: params.id } });
   return NextResponse.json({ ok: true });
 }
