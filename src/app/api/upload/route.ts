@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { fillDefaults, ParsedAgeingRow } from '@/lib/parseFinancials';
 import { processAnyFile } from '@/lib/processUpload';
+import { forbidden, getSession, unauthorised } from '@/lib/auth';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -18,6 +19,8 @@ export async function POST(req: NextRequest) {
 }
 
 async function handleUpload(req: NextRequest) {
+  const session = await getSession(req);
+  if (!session) return unauthorised();
   const form = await req.formData();
   const files = form.getAll('files') as File[];
   const previousFiles = form.getAll('previousFiles') as File[];
@@ -25,11 +28,13 @@ async function handleUpload(req: NextRequest) {
   const closingStock = num('closingStock'), previousClosingStock = num('previousClosingStock');
   const companyId = form.get('companyId') as string | null;
   const companyName = form.get('companyName') as string | null;
-  const currentLabel = (form.get('currentPeriodLabel') as string) || 'Current';
+  const currentLabelIn = ((form.get('currentPeriodLabel') as string) || '').trim();
   const currentEnd = form.get('currentPeriodEnd') as string | null;
-  const previousLabel = (form.get('previousPeriodLabel') as string) || 'Previous';
+  const previousLabelIn = ((form.get('previousPeriodLabel') as string) || '').trim();
   const previousEnd = form.get('previousPeriodEnd') as string | null;
 
+  // a client login may only update its own company and can never create one
+  if (session.r === 'client' && companyId !== session.c) return forbidden();
   if (!files.length) return NextResponse.json({ error: 'No files uploaded' }, { status: 400 });
   if (!companyId && !companyName) {
     return NextResponse.json({ error: 'companyName is required when creating a new company' }, { status: 400 });
@@ -99,19 +104,31 @@ async function handleUpload(req: NextRequest) {
   }
 
   if (financialsCurrent) {
+    const existing = await prisma.financialPeriod.findMany({ where: { companyId: company.id } });
+    const exCur = existing.find((p: any) => p.sequence === 0), exPrev = existing.find((p: any) => p.sequence === 1);
     const currData = fillDefaults(financialsCurrent);
-    const prevData = fillDefaults(financialsPrevious ?? {});
+    const curLabel = currentLabelIn || exCur?.label || 'Current';
+    const prevLabel = previousLabelIn || exPrev?.label || 'Previous';
+    const curEnd = currentEnd ? new Date(currentEnd) : exCur?.periodEnd ?? new Date();
 
     await prisma.financialPeriod.upsert({
       where: { companyId_sequence: { companyId: company.id, sequence: 0 } },
-      update: { label: currentLabel, periodEnd: currentEnd ? new Date(currentEnd) : new Date(), data: currData as any },
-      create: { companyId: company.id, sequence: 0, label: currentLabel, periodEnd: currentEnd ? new Date(currentEnd) : new Date(), data: currData as any },
+      update: { label: curLabel, periodEnd: curEnd, data: currData as any },
+      create: { companyId: company.id, sequence: 0, label: curLabel, periodEnd: curEnd, data: currData as any },
     });
-    await prisma.financialPeriod.upsert({
-      where: { companyId_sequence: { companyId: company.id, sequence: 1 } },
-      update: { label: previousLabel, periodEnd: previousEnd ? new Date(previousEnd) : new Date(), data: prevData as any },
-      create: { companyId: company.id, sequence: 1, label: previousLabel, periodEnd: previousEnd ? new Date(previousEnd) : new Date(), data: prevData as any },
-    });
+    // Re-uploading only this year's figures must not wipe last year's: touch the previous period
+    // only when previous-year data came with the upload or there is none yet.
+    if (financialsPrevious || !exPrev) {
+      const prevData = fillDefaults(financialsPrevious ?? {});
+      const prevEnd = previousEnd ? new Date(previousEnd) : exPrev?.periodEnd ?? new Date();
+      await prisma.financialPeriod.upsert({
+        where: { companyId_sequence: { companyId: company.id, sequence: 1 } },
+        update: { label: prevLabel, periodEnd: prevEnd, data: prevData as any },
+        create: { companyId: company.id, sequence: 1, label: prevLabel, periodEnd: prevEnd, data: prevData as any },
+      });
+    } else if (previousLabelIn || previousEnd) {
+      await prisma.financialPeriod.update({ where: { id: exPrev.id }, data: { label: prevLabel, periodEnd: previousEnd ? new Date(previousEnd) : exPrev.periodEnd } });
+    }
   }
 
   if (allReceivables.length || allPayables.length || allInventory.length) {
