@@ -38,7 +38,7 @@ export async function POST(req: NextRequest) {
     if (tb && !Object.keys(previous).length) notes.push('Previous-year column is empty: upload last year\'s trial balance too, or type it in. Without it, growth and trend figures cannot be shown.');
 
     const buf = await buildTemplateWorkbook({ current, previous, tb, previousTb, notes });
-    return new NextResponse(buf, {
+    return new NextResponse(new Uint8Array(buf as any) as any, {
       headers: {
         'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         'Content-Disposition': 'attachment; filename="MIS_Template_Prefilled.xlsx"',
