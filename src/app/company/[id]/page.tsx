@@ -1,5 +1,6 @@
 'use client';
 import { useEffect, useState } from 'react';
+import ManagePanel from './ManagePanel';
 import LandingOverview from './LandingOverview';
 import {
   formatINR, pctF, pctChange, fmtByUnit,
@@ -29,6 +30,11 @@ export default function CompanyPage({ params }: { params: { id: string } }) {
   const [tab, setTab] = useState(0);
   const [subTab, setSubTab] = useState(0); // landing = Overview (KPIs, summary, WC levers)
   const [error, setError] = useState<string | null>(null);
+  const [role, setRole] = useState<'admin' | 'client' | null>(null);
+  const [manageOpen, setManageOpen] = useState(false);
+
+  useEffect(() => { fetch('/api/auth/me').then((r) => r.json()).then((d) => setRole(d.role ?? null)).catch(() => {}); }, []);
+  const logout = async () => { await fetch('/api/auth/logout', { method: 'POST' }); window.location.href = '/login'; };
 
   const refetch = () => {
     fetch(`/api/companies/${params.id}`)
@@ -45,8 +51,11 @@ export default function CompanyPage({ params }: { params: { id: string } }) {
     return (
       <div className="p-8">
         <h1 className="font-display text-2xl mb-2">{data.name}</h1>
-        <p className="text-inksoft">No financials uploaded yet for this company. Go back to the dashboard and upload a financials file.</p>
-        <a href="/dashboard" className="text-brassdark underline">← Back to dashboard</a>
+        <p className="text-inksoft mb-3">No financials uploaded yet for this company.</p>
+        {role === 'admin' && <button onClick={() => setManageOpen(true)} className="bg-ink text-paper px-4 py-2 rounded font-semibold mr-3">Upload data</button>}
+        {role === 'admin' && <a href="/dashboard" className="text-brassdark underline">← Back to dashboard</a>}
+        {role === 'client' && <button onClick={logout} className="text-brassdark underline">Log out</button>}
+        {manageOpen && <ManagePanel companyId={params.id} name={data.name} onChanged={refetch} onClose={() => setManageOpen(false)} />}
       </div>
     );
   }
@@ -61,12 +70,19 @@ export default function CompanyPage({ params }: { params: { id: string } }) {
   return (
     <div className="flex min-h-screen">
       <nav className="w-56 bg-ink text-paper flex-shrink-0 p-5 sticky top-0 h-screen overflow-y-auto print:hidden">
-        <a href="/dashboard" className="text-xs text-brass hover:underline">← Companies</a>
+        {role === 'client'
+          ? <button onClick={logout} className="text-xs text-brass hover:underline">Log out</button>
+          : <a href="/dashboard" className="text-xs text-brass hover:underline">← Companies</a>}
         <h1 className="font-display font-semibold text-xl mt-2 mb-1">{data.name}</h1>
         <p className="text-[0.68rem] text-brass uppercase tracking-wide mb-4">{currentLabel} vs {previousLabel}</p>
         <button onClick={() => window.print()} className="w-full mb-5 text-xs bg-brass/20 border border-brass text-paper rounded px-3 py-2 hover:bg-brass/30 transition">
           ⬇ Download PDF Report
         </button>
+        {role === 'admin' && (
+          <button onClick={() => setManageOpen(true)} className="w-full mb-5 -mt-3 text-xs bg-paper/10 border border-paper/40 text-paper rounded px-3 py-2 hover:bg-paper/20 transition">
+            ⚙ Manage company
+          </button>
+        )}
         <ul className="space-y-1">
           {TABS.map((t, i) => (
             <li key={t}>
@@ -110,6 +126,7 @@ export default function CompanyPage({ params }: { params: { id: string } }) {
         <TabPanel active={tab === 5}><MsmeFundingTab A={A} health={health} msme={msme} alerts={alerts} /></TabPanel>
         <TabPanel active={tab === 6} noPrint><ChatTab companyId={params.id} /></TabPanel>
       </main>
+      {manageOpen && <ManagePanel companyId={params.id} name={data.name} onChanged={refetch} onClose={() => setManageOpen(false)} />}
     </div>
   );
 }
