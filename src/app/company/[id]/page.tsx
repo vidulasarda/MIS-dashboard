@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react';
 import ManagePanel from './ManagePanel';
 import LandingOverview from './LandingOverview';
+import ForecastTab from './ForecastTab';
 import {
   formatINR, pctF, pctChange, fmtByUnit,
   expenseBreakdown, expenseVarianceExplain, FUNDING_SCHEMES, computeFundingGaps,
@@ -21,6 +22,7 @@ const TABS = [
   'Financial Ratios',
   'Working Capital',
   'MSME & Funding',
+  'Cash Forecast',
   'Ask the CFO Agent',
 ];
 const SLIDE1_SUBTABS = ['Overview', 'Trade Receivables', 'Trade Payables', 'Inventory'];
@@ -120,11 +122,12 @@ export default function CompanyPage({ params }: { params: { id: string } }) {
           </div>
         )}
         <TabPanel active={tab === 1}><ProfitabilityTab companyId={params.id} A={A} P={P} currentLabel={currentLabel} previousLabel={previousLabel} /></TabPanel>
-        <TabPanel active={tab === 2}><ExpenseTab A={A} P={P} currentLabel={currentLabel} previousLabel={previousLabel} /></TabPanel>
+        <TabPanel active={tab === 2}><ExpenseTab companyId={params.id} A={A} P={P} currentLabel={currentLabel} previousLabel={previousLabel} /></TabPanel>
         <TabPanel active={tab === 3}><RatiosTab A={A} P={P} currentLabel={currentLabel} previousLabel={previousLabel} /></TabPanel>
         <TabPanel active={tab === 4}><WorkingCapitalTab A={A} P={P} currentLabel={currentLabel} previousLabel={previousLabel} /></TabPanel>
         <TabPanel active={tab === 5}><MsmeFundingTab A={A} health={health} msme={msme} alerts={alerts} /></TabPanel>
-        <TabPanel active={tab === 6} noPrint><ChatTab companyId={params.id} /></TabPanel>
+        <TabPanel active={tab === 6}><ForecastTab A={A} P={P} /></TabPanel>
+        <TabPanel active={tab === 7} noPrint><ChatTab companyId={params.id} /></TabPanel>
       </main>
       {manageOpen && <ManagePanel companyId={params.id} name={data.name} onChanged={refetch} onClose={() => setManageOpen(false)} />}
     </div>
@@ -788,7 +791,7 @@ function DonutChart({ segments }: { segments: { label: string; value: number; co
   );
 }
 const EXPENSE_COLORS = ['#A97C3F', '#7A1F2B', '#2E5339', '#B8721A', '#3A4A6B', '#8A6530'];
-function ExpenseTab({ A, P, currentLabel, previousLabel }: any) {
+function ExpenseTab({ companyId, A, P, currentLabel, previousLabel }: any) {
   const lines = expenseBreakdown(A, P);
   const totalCurrent = lines.reduce((s, l) => s + Math.abs(l.current), 0);
   const segments = lines.map((l, i) => ({ label: l.label, value: Math.abs(l.current), color: EXPENSE_COLORS[i % EXPENSE_COLORS.length] }));
@@ -821,12 +824,109 @@ function ExpenseTab({ A, P, currentLabel, previousLabel }: any) {
           <tr className="total"><td className="label">Total Expenses</td><td>{formatINR(A.totalExpenses)}</td><td>{A.revenue ? (A.totalExpenses / A.revenue * 100).toFixed(1) : '0.0'}%</td><td>100.0%</td><td>{formatINR(P.totalExpenses)}</td><td><ChangeBadge curr={A.totalExpenses} prev={P.totalExpenses} goodIfUp={false} /></td></tr>
         </tbody>
       </table>
+      <ExpenseSplitSection companyId={companyId} A={A} P={P} currentLabel={currentLabel} previousLabel={previousLabel} />
       <h2 className="font-display font-semibold mb-2 mt-6">Lines with &gt;50% Variance</h2>
       {lines.filter((l) => { const g = pctChange(l.current, l.previous); return g !== null && Math.abs(g) > 50; }).map((l) => (
         <div key={l.label} className="note mb-2"><b>{l.label}:</b> {expenseVarianceExplain(l, A, P)}</div>
       ))}
       {lines.filter((l) => { const g = pctChange(l.current, l.previous); return g !== null && Math.abs(g) > 50; }).length === 0 && (
         <div className="note">No expense line moved more than 50% period-on-period.</div>
+      )}
+    </div>
+  );
+}
+
+
+/* ================= Expense split (detail behind the P&L heads) ================= */
+function ExpenseSplitSection({ companyId, A, P, currentLabel, previousLabel }: any) {
+  const [rows, setRows] = useState<{ head: string; current: number; previous: number }[]>([]);
+  const [file, setFile] = useState<File | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+  async function load() {
+    try { const r = await fetch(`/api/companies/${companyId}/expense-split`); if (r.ok) setRows((await r.json()).rows ?? []); } catch {}
+  }
+  useEffect(() => { load(); }, [companyId]);
+
+  async function upload() {
+    if (!file) return;
+    setBusy(true); setMsg(null);
+    const form = new FormData(); form.append('file', file);
+    try {
+      const r = await fetch(`/api/companies/${companyId}/expense-split`, { method: 'POST', body: form });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) setMsg({ ok: false, text: d.error ?? 'Upload failed' });
+      else { setMsg({ ok: true, text: `${d.count} expense heads loaded.` + (d.warnings?.length ? ' ' + d.warnings.join(' ') : '') }); setFile(null); await load(); }
+    } catch { setMsg({ ok: false, text: 'Upload failed' }); }
+    setBusy(false);
+  }
+  async function clear() {
+    if (!confirm('Remove the uploaded expense split?')) return;
+    await fetch(`/api/companies/${companyId}/expense-split`, { method: 'DELETE' });
+    setRows([]); setMsg(null);
+  }
+
+  const totC = rows.reduce((s, r) => s + r.current, 0);
+  const totP = rows.reduce((s, r) => s + r.previous, 0);
+  // Which reported figure does the split add up to? Pick the closer of Other Expenses, or Other + Direct.
+  const bases = [
+    { label: 'Other Expenses', cur: A.otherExpenses, prev: P.otherExpenses },
+    { label: 'Other + Employee/Direct Expenses', cur: A.otherExpenses + A.directExpenses, prev: P.otherExpenses + P.directExpenses },
+  ];
+  const base = Math.abs(totC - bases[0].cur) <= Math.abs(totC - bases[1].cur) ? bases[0] : bases[1];
+  const diff = totC - base.cur;
+  const top = rows.slice(0, 8);
+  const maxV = Math.max(1, ...top.map((r) => Math.abs(r.current)));
+
+  return (
+    <div className="mt-8 print:break-inside-avoid">
+      <h2 className="font-display font-semibold mb-1">Expense split — what is inside Other / Employee expenses</h2>
+      <p className="text-xs text-inksoft mb-3">The financials give one line for these heads. Upload the split (expense head and amount) to see where the money actually goes.</p>
+      <div className="card p-4 mb-4 border-dashed">
+        <div className="flex items-center gap-2 flex-wrap">
+          <input type="file" accept=".xlsx,.xls" onChange={(e) => { setFile(e.target.files?.[0] ?? null); setMsg(null); }}
+            className="text-sm border border-rule rounded px-2 py-1.5 bg-[#FBF8EF] flex-1 min-w-[200px]" />
+          <button onClick={upload} disabled={!file || busy}
+            className="bg-brassdark text-white text-sm font-semibold px-4 py-1.5 rounded hover:bg-ink transition disabled:opacity-40">{busy ? 'Uploading…' : 'Upload split'}</button>
+          <a href="/MIS_Expense_Split_Template.xlsx" download className="text-sm text-brassdark underline">Download template</a>
+          {rows.length > 0 && <button onClick={clear} className="text-xs text-oxblood underline">Remove split</button>}
+        </div>
+        {msg && <p className={`text-xs mt-2 font-mono ${msg.ok ? 'text-forest' : 'text-oxblood'}`}>{msg.text}</p>}
+      </div>
+
+      {rows.length === 0 ? (
+        <div className="note">No expense split uploaded yet. Download the template, list each expense head with its amount for this year (and last year if available), and upload it here.</div>
+      ) : (
+        <>
+          <div className="space-y-1.5 mb-4">
+            {top.map((r) => (
+              <div key={r.head} className="flex items-center gap-2 text-xs">
+                <span className="w-44 truncate text-inksoft" title={r.head}>{r.head}</span>
+                <div className="flex-1 bg-[#EFE9D8] rounded h-3"><div className="h-3 rounded bg-brass" style={{ width: `${(Math.abs(r.current) / maxV) * 100}%` }} /></div>
+                <span className="font-mono w-24 text-right">{formatINR(r.current)}</span>
+              </div>
+            ))}
+          </div>
+          <table className="datatable mb-3">
+            <thead><tr><th>Expense head</th><th>{currentLabel}</th><th>% of split</th><th>% of Revenue</th><th>{previousLabel}</th><th>Change</th></tr></thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.head}>
+                  <td className="label">{r.head}</td><td>{formatINR(r.current)}</td>
+                  <td>{totC ? ((r.current / totC) * 100).toFixed(1) : '0.0'}%</td>
+                  <td>{A.revenue ? ((r.current / A.revenue) * 100).toFixed(1) : '0.0'}%</td>
+                  <td>{r.previous ? formatINR(r.previous) : '—'}</td>
+                  <td>{r.previous ? <ChangeBadge curr={r.current} prev={r.previous} goodIfUp={false} /> : '—'}</td>
+                </tr>
+              ))}
+              <tr className="total"><td className="label">Total of split</td><td>{formatINR(totC)}</td><td>100.0%</td><td>{A.revenue ? ((totC / A.revenue) * 100).toFixed(1) : '0.0'}%</td><td>{totP ? formatINR(totP) : '—'}</td><td>{totP ? <ChangeBadge curr={totC} prev={totP} goodIfUp={false} /> : '—'}</td></tr>
+            </tbody>
+          </table>
+          {Math.abs(diff) <= Math.max(1000, base.cur * 0.005)
+            ? <div className="note">Reconciles to <b>{base.label}</b> in the financials ({formatINR(base.cur)}).</div>
+            : <div className="note">Split total is {formatINR(Math.abs(diff))} {diff > 0 ? 'higher' : 'lower'} than <b>{base.label}</b> in the financials ({formatINR(base.cur)}). Check for missing or extra heads, or whether staff cost is included.</div>}
+        </>
       )}
     </div>
   );
