@@ -103,7 +103,13 @@ export default function ForecastTab({ A, P }: { A: any; P: any }) {
           ))}
         </tbody>
       </table>
-      <p className="text-xs text-inksoft mb-5">{cur.s.note} Click a row to see its month-by-month detail below.</p>
+      <div className="note mb-5">
+        <b>How the scenarios are built.</b> Each one is the Base case with fixed shifts, not a statistical forecast.
+        <ul className="list-disc ml-5 mt-1 space-y-0.5">
+          {scenarios.map((s) => <li key={s.key}><b>{s.name}:</b> {s.note}</li>)}
+        </ul>
+        <span className="block mt-1 text-xs text-inksoft">Click a row above to see its month-by-month detail below.</span>
+      </div>
 
       <h2 className="font-display font-semibold mb-2">Month by month: {cur.s.name}</h2>
       <div className="overflow-x-auto mb-5">
